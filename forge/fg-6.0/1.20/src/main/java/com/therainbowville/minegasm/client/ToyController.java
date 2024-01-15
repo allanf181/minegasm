@@ -43,6 +43,8 @@ public class ToyController {
                 lastErrorMessage = "No device found";
             }
 
+            client.stopScanning();
+
             for (ButtplugClientDevice dev : devices) {
                 if (dev.getScalarVibrateCount() != 0) {
                     LOGGER.info(dev.getDisplayName());
@@ -84,6 +86,7 @@ public class ToyController {
 
         if (MinegasmConfig.vibrate) {
             try {
+                LOGGER.trace("Setvibration level: " + level + ", current: " + currentVibrationLevel);
                 device.sendScalarVibrateCmd(level);
                 currentVibrationLevel = level;
             } catch (Exception e) {

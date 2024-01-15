@@ -3,19 +3,20 @@ package com.therainbowville.minegasm.client;
 import com.therainbowville.minegasm.common.Minegasm;
 import com.therainbowville.minegasm.config.ClientConfig;
 import com.therainbowville.minegasm.config.MinegasmConfig;
+import com.therainbowville.minegasm.events.ClientBlockBreakEvent;
+import com.therainbowville.minegasm.events.ClientBreakingBlockEvent;
+import com.therainbowville.minegasm.events.ClientChangeExperienceEvent;
+import com.therainbowville.minegasm.events.ClientDamageEvent;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.player.LocalPlayer;
-import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.network.chat.Component;
-import net.minecraft.world.level.LevelAccessor;
 import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.common.ToolAction;
+import net.minecraftforge.common.ForgeHooks;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.EntityJoinLevelEvent;
 import net.minecraftforge.event.level.BlockEvent;
@@ -25,14 +26,23 @@ import net.minecraftforge.event.entity.player.*;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.lwjgl.glfw.GLFW;
 
 import java.util.*;
-import java.util.stream.Collectors;
 
 
-@Mod.EventBusSubscriber(modid = Minegasm.MOD_ID, bus = Mod.EventBusSubscriber.Bus.FORGE)
+@Mod.EventBusSubscriber(modid = Minegasm.MOD_ID, bus = Mod.EventBusSubscriber.Bus.FORGE, value = Dist.CLIENT)
 public class ClientEventHandler {
+
+    private static final long window = Minecraft.getInstance().getWindow().getWindow();
+
+
+
+    public static boolean isFocus() {
+        return GLFW.glfwGetWindowAttrib(window, 131073) != 0;
+    }
+
+    public static boolean lastFocus = isFocus();
     private static final org.apache.logging.log4j.Logger LOGGER = LogManager.getLogger();
     private static final int TICKS_PER_SECOND = 20;
     private static int tickCounter = -1;
@@ -50,7 +60,11 @@ public class ClientEventHandler {
     }
 
     private static int getStateCounter() {
-        return tickCounter / 20;
+        return (tickCounter / 20) + 1;
+    }
+
+    private static int getNextStateCounter() {
+        return getStateCounter() + 1;
     }
 
     private static void setState(int start, int duration, int intensity, boolean decay) {
@@ -61,13 +75,13 @@ public class ClientEventHandler {
         if (decay) {
             int safeDuration = Math.max(0, duration - 2);
             for (int i = 0; i < safeDuration; i++) {
-                setState(start+i, intensity);
+                setState(start + i, intensity);
             }
-            setState(start+safeDuration, intensity/2);
-            setState(start+safeDuration+1, intensity/4);
+            setState(start + safeDuration, intensity / 2);
+            setState(start + safeDuration + 1, intensity / 4);
         } else {
             for (int i = 0; i < duration; i++) {
-                setState(start+i, intensity);
+                setState(start + i, intensity);
             }
         }
     }
@@ -78,6 +92,7 @@ public class ClientEventHandler {
     }
 
     private static void setState(int counter, int intensity, boolean accumulate) {
+        LOGGER.trace("SetState intensity: " + intensity);
         int safeCounter = counter % state.length;
         if (accumulate) {
             state[safeCounter] = Math.min(1.0, state[safeCounter] + (intensity / 100.0));
@@ -133,43 +148,47 @@ public class ClientEventHandler {
     @SubscribeEvent
     public static void onPlayerTick(TickEvent.PlayerTickEvent event) {
         try {
-        if (event.phase == TickEvent.Phase.END ) {
-            Player player = event.player;;
-            UUID uuid = player.getGameProfile().getId();
+            if (event.phase == TickEvent.Phase.END) {
+                Player player = event.player;
+                UUID uuid = player.getGameProfile().getId();
 
-            float playerHealth = player.getHealth();
-            float playerFoodLevel = player.getFoodData().getFoodLevel();
+                float playerHealth = player.getHealth();
+                float playerFoodLevel = player.getFoodData().getFoodLevel();
 
-            tickCounter = (tickCounter + 1) % (20 * (60 * TICKS_PER_SECOND)); // 20 min day cycle
+                tickCounter = (tickCounter + 1) % (20 * (60 * TICKS_PER_SECOND)); // 20 min day cycle
 
-            if (tickCounter % TICKS_PER_SECOND == 0) { // every 1 sec
-                if (uuid.equals(playerId)) {
-                    int stateCounter = getStateCounter();
+                if (tickCounter % TICKS_PER_SECOND == 0) { // every 1 sec
+                    if (uuid.equals(playerId)) {
+                        int stateCounter = getStateCounter();
 
-                    if (MinegasmConfig.mode.equals(ClientConfig.GameplayMode.MASOCHIST)) {
-                        if (playerHealth > 0 && playerHealth <= 1) {
+                        if (MinegasmConfig.mode.equals(ClientConfig.GameplayMode.MASOCHIST)) {
+                            if (playerHealth > 0 && playerHealth <= 1) {
+                                setState(stateCounter, getIntensity("vitality"));
+                            }
+                        } else if (playerHealth >= 20 && playerFoodLevel >= 20) {
                             setState(stateCounter, getIntensity("vitality"));
                         }
-                    } else if (playerHealth >= 20 && playerFoodLevel >= 20) {
-                        setState(stateCounter, getIntensity("vitality"));
-                    }
 
-                    double newVibrationLevel = state[stateCounter];
-                    state[stateCounter] = 0;
+                        if (lastFocus != isFocus() && ToyController.getDeviceName().contains("XInput")) {
+                            lastFocus = isFocus();
+                            LOGGER.trace("Focus changed to: " + isFocus());
+                            state[stateCounter] = 0;
+                        }
 
-                    LOGGER.trace("Tick " + stateCounter + ": " + newVibrationLevel);
+                        double newVibrationLevel = state[stateCounter];
+                        state[stateCounter] = 0;
 
-                    if (ToyController.currentVibrationLevel != newVibrationLevel) {
+                        LOGGER.trace("Tick " + stateCounter + ": " + newVibrationLevel);
+
                         ToyController.setVibrationLevel(newVibrationLevel);
                     }
                 }
-            }
 
-            if (tickCounter % (5 * TICKS_PER_SECOND) == 0) { // 5 secs
-                LOGGER.debug("Health: " + playerHealth);
-                LOGGER.debug("Food: " + playerFoodLevel);
+                if (tickCounter % (5 * TICKS_PER_SECOND) == 0) { // 5 secs
+                    LOGGER.trace("Health: " + playerHealth);
+                    LOGGER.trace("Food: " + playerFoodLevel);
+                }
             }
-        }
         } catch (Throwable e) {
             LOGGER.throwing(e);
         }
@@ -185,12 +204,8 @@ public class ClientEventHandler {
                 } else {
                     if (!paused) {
                         paused = true;
-                        LOGGER.debug("Pausing");
+                        LOGGER.trace("Pausing");
                         ToyController.setVibrationLevel(0);
-                    }
-
-                    if (paused) {
-                        LOGGER.trace("Paused");
                     }
                 }
             }
@@ -198,162 +213,179 @@ public class ClientEventHandler {
     }
 
     @SubscribeEvent
-    public static void onAttack(AttackEntityEvent event)
-    {
+    public static void onAttack(AttackEntityEvent event) {
         try {
-        Entity entity = event.getEntity();
+            Entity entity = event.getEntity();
+            if (entity instanceof Player) {
+                Player player = (Player) entity;
+                UUID uuid = player.getGameProfile().getId();
+
+                if (uuid.equals(playerId)) {
+                    setState(getNextStateCounter(), 3, getIntensity("attack"), true);
+                }
+            }
+        } catch (Throwable e) {
+            LOGGER.throwing(e);
+        }
+    }
+
+    private static void processDamage(Entity entity) {
         if (entity instanceof Player) {
-            Player player = (Player) entity;;
+            Player player = (Player) entity;
             UUID uuid = player.getGameProfile().getId();
 
             if (uuid.equals(playerId)) {
-                setState(getStateCounter(), 3, getIntensity("attack"), true);
+                setState(getNextStateCounter(), 3, getIntensity("hurt"), true);
             }
         }
-    } catch (Throwable e) {
-        LOGGER.throwing(e);
     }
+
+    private static void processXpChange(int difference) {
+        long duration = Math.round(Math.ceil(Math.log(difference + 0.5)));
+
+        LOGGER.trace("XP CHANGE: " + difference);
+        LOGGER.trace("duration: " + duration);
+
+        setState(getNextStateCounter(), Math.toIntExact(duration), getIntensity("xpChange"), true);
     }
 
     @SubscribeEvent
-    public static void onCriticalHit(CriticalHitEvent event)
-    {
-        LOGGER.debug("Critical: " + event.isVanillaCritical());
-    }
-
-    @SubscribeEvent
-    public static void onHurt(LivingHurtEvent event)
-    {
+    public static void onHurt(LivingHurtEvent event) {
         try {
-        Entity entity = event.getEntity();
-        if (entity instanceof Player) {
-            Player player = (Player) entity;;
-            UUID uuid = player.getGameProfile().getId();
-
-            if (uuid.equals(playerId)) {
-                setState(getStateCounter(), 3, getIntensity("hurt"), true);
-            }
-        }
+            processDamage(event.getEntity());
         } catch (Throwable e) {
             LOGGER.throwing(e);
         }
     }
 
     @SubscribeEvent
-    public static void onDeath(LivingDeathEvent event)
-    {
+    public static void onDeath(LivingDeathEvent event) {
         try {
-        Entity entity = event.getEntity();
-        if (entity instanceof Player) {
-            Player player = (Player) entity;;
-            UUID uuid = player.getGameProfile().getId();
+            Entity entity = event.getEntity();
+            if (entity instanceof Player) {
+                Player player = (Player) entity;
+                UUID uuid = player.getGameProfile().getId();
 
-            if (uuid.equals(playerId)) {
-                ToyController.setVibrationLevel(0);
+                if (uuid.equals(playerId)) {
+                    ToyController.setVibrationLevel(0);
+                }
             }
+        } catch (Throwable e) {
+            LOGGER.throwing(e);
         }
-    } catch (Throwable e) {
-        LOGGER.throwing(e);
-    }
     }
 
     @SubscribeEvent
-    public static void onHarvest(PlayerEvent.HarvestCheck event)
-    {
-        try {
-        Player player = event.getEntity();
-            UUID uuid = player.getGameProfile().getId();
+    public static void onClientBreakingBlock(ClientBreakingBlockEvent event){
+        LOGGER.trace("ClientBlockBreak: " + event.getBlockState().getBlock().toString() + " at " + event.getBlockPos().toString());
+        LOGGER.trace("Stage: " + event.getDestroyStage());
 
-            if (uuid.equals(playerId)) {
-            BlockState blockState = event.getTargetBlock();
+        UUID uuid = event.getPlayer().getGameProfile().getId();
+
+        if (uuid.equals(playerId)) {
+            BlockState blockState = event.getBlockState();
             Block block = blockState.getBlock();
+            boolean canHarvest = ForgeHooks.isCorrectToolForDrops(blockState, event.getPlayer());
 
             // ToolType. AXE, HOE, PICKAXE, SHOVEL
             @SuppressWarnings("ConstantConditions") float blockHardness = block.defaultBlockState().getDestroySpeed(null, null);
-            LOGGER.debug("Harvest: tool: " +
+            LOGGER.trace("Harvest: tool: " +
                     "?" +
-                    " can harvest? " + event.canHarvest() + " hardness: " + blockHardness);
+                    " can harvest? " + canHarvest + " hardness: " + blockHardness);
 
-            int intensity = Math.toIntExact(Math.round((getIntensity("harvest") / 100.0 * (blockHardness / 50.0)) * 100));
+            int minIntensity = Math.toIntExact(Math.round((getIntensity("harvest") * (Math.min(blockHardness, 20) / 20.0))));
+            int maxIntensity = Math.toIntExact(Math.round((getIntensity("mine") * (Math.min(blockHardness, 20) / 20.0))));
 
-            if (event.canHarvest()) {
-                setState(getStateCounter(), 1, intensity, false);
+            int intensity = minIntensity + (maxIntensity - minIntensity) * (event.getDestroyStage()+1) / 10;
+
+            if (canHarvest) {
+                setState(getNextStateCounter(), 1, intensity, false);
             }
         }
+    }
+
+    private static void processBreakEvent(BlockState blockState, Player player) {
+        Block block = blockState.getBlock();
+        @SuppressWarnings("ConstantConditions") float blockHardness = block.defaultBlockState().getDestroySpeed(null, null);
+
+        LOGGER.trace("Breaking: " + block.toString());
+
+        ItemStack mainhandItem = player.getMainHandItem();
+        boolean usingAppropriateTool = mainhandItem.isCorrectToolForDrops(blockState);
+        LOGGER.trace("using pickaxe: " + mainhandItem.toString() + ", using appropriate tool: " + usingAppropriateTool);
+
+        if (usingAppropriateTool) {
+            int duration = Math.max(1, Math.min(5, Math.toIntExact(Math.round(Math.ceil(Math.log(blockHardness + 0.5))))));
+            int intensity = Math.toIntExact(Math.round((getIntensity("mine") * (Math.min(blockHardness, 20) / 20.0))));
+            setState(getNextStateCounter(), duration, intensity, true);
+        }
+    }
+
+    @SubscribeEvent
+    public static void onBreak(BlockEvent.BreakEvent event) {
+        try {
+            Player player = event.getPlayer();
+            UUID uuid = player.getGameProfile().getId();
+
+            if (uuid.equals(playerId)) {
+                processBreakEvent(event.getState(), player);
+
+                LOGGER.trace("XP to drop: " + event.getExpToDrop());
+            }
         } catch (Throwable e) {
             LOGGER.throwing(e);
         }
     }
 
     @SubscribeEvent
-    public static void onBreak(BlockEvent.BreakEvent event)
-    {
+    public static void onClientBlockBreak(ClientBlockBreakEvent event){
+        LOGGER.trace("ClientBlockBreak: " + event.getBlockState().getBlock().toString() + " at " + event.getBlockPos().toString());
         try {
-        Player player = event.getPlayer();;
+            processBreakEvent(event.getBlockState(), event.getPlayer());
+        } catch (Throwable e) {
+            LOGGER.throwing(e);
+        }
+    }
+
+    @SubscribeEvent
+    public static void onClientDamageEvent(ClientDamageEvent event){
+        try {
+            processDamage(event.getEntity());
+        } catch (Throwable e) {
+            LOGGER.throwing(e);
+        }
+    }
+
+    @SubscribeEvent
+    public static void onXpChange(PlayerXpEvent.XpChange event) {
+        try {
+            Player player = event.getEntity();
             UUID uuid = player.getGameProfile().getId();
 
             if (uuid.equals(playerId)) {
-            BlockState blockState = event.getState();
-            Block block = blockState.getBlock();
-            @SuppressWarnings("ConstantConditions") float blockHardness = block.defaultBlockState().getDestroySpeed(null, null);
-
-            LOGGER.info("Breaking: " + block.toString());
-
-            ItemStack mainhandItem = event.getPlayer().getMainHandItem();
-            boolean usingAppropriateTool = mainhandItem.isCorrectToolForDrops(blockState);
-            List<ToolAction> toolCan = ToolAction.getActions().stream().filter(a -> mainhandItem.canPerformAction(a)).collect(Collectors.toList());
-            LOGGER.debug("mainhand: " + mainhandItem + " [" +  toolCan + "]");
-            LOGGER.debug("using pickaxe: " + mainhandItem.toString() + ", using appropriate tool: " + usingAppropriateTool);
-
-            if (toolCan.contains(ToolAction.get("AXE")) && usingAppropriateTool) {
-                int duration = Math.max(1, Math.min(5, Math.toIntExact(Math.round(Math.ceil(Math.log(blockHardness + 0.5))))));
-                int intensity = Math.toIntExact(Math.round((getIntensity("mine") / 100.0 * (blockHardness / 50.0)) * 100));
-                setState(getStateCounter(), duration, intensity, true);
+                processXpChange(event.getAmount());
             }
-
-            LOGGER.info("XP to drop: " + event.getExpToDrop());
+        } catch (Throwable e) {
+            LOGGER.throwing(e);
         }
-    } catch (Throwable e) {
-        LOGGER.throwing(e);
-    }
     }
 
     @SubscribeEvent
-    public static void onItemPickup(EntityItemPickupEvent event)
-    {
-        LOGGER.info("Pickup item: " + event.getItem().toString());
-    }
-
-    @SubscribeEvent
-    public static void onXpPickup(PlayerXpEvent.PickupXp event)
-    {
-        //LOGGER.info("Pickup XP: " + event.getOrb().xpValue);
-    }
-
-    @SubscribeEvent
-    public static void onXpChange(PlayerXpEvent.XpChange event)
-    {
+    public static void onClientXpChange(ClientChangeExperienceEvent event){
+        LOGGER.trace("Client XP Change from " + event.getOldExperience() + " to " + event.getNewExperience() + " (" + event.getDifference() + ")");
+        if (event.getOldExperience() == 0){
+            LOGGER.trace("Ignoring initial XP change");
+            return;
+        }
         try {
-        Player player = event.getEntity();
-            UUID uuid = player.getGameProfile().getId();
-
-            if (uuid.equals(playerId)) {
-            int xpChange = event.getAmount();
-            long duration = Math.round(Math.ceil(Math.log(xpChange + 0.5)));
-
-            LOGGER.info("XP CHANGE: " + xpChange);
-            LOGGER.debug("duration: " + duration);
-
-            setState(getStateCounter(), Math.toIntExact(duration), getIntensity("xpChange"), true);
+            processXpChange(event.getDifference());
+        } catch (Throwable e) {
+            LOGGER.throwing(e);
         }
-    } catch (Throwable e) {
-        LOGGER.throwing(e);
-    }
     }
 
     @SubscribeEvent
-    public static void onRespawn(PlayerEvent.PlayerRespawnEvent event)
-    {
+    public static void onRespawn(PlayerEvent.PlayerRespawnEvent event) {
         Entity entity = event.getEntity();
 
         if (entity instanceof Player) {
@@ -379,7 +411,7 @@ public class ClientEventHandler {
     @SubscribeEvent
     public static void onWorldEntry(EntityJoinLevelEvent event) {
         Entity entity = event.getEntity();
-        if( !event.getLevel().isClientSide() ) {
+        if (!event.getLevel().isClientSide()) {
             return;
         }
 
@@ -393,7 +425,7 @@ public class ClientEventHandler {
                 if (uuid.equals(Minecraft.getInstance().player.getGameProfile().getId())) {
                     LOGGER.info("Player in: " + player.getGameProfile().getName() + " " + player.getGameProfile().getId().toString());
                     if (ToyController.connectDevice()) {
-                        setState(getStateCounter(), 5);
+                        setState(getNextStateCounter(), 5);
                         player.displayClientMessage(Component.literal(String.format("Connected to " + ChatFormatting.GREEN + "%s" + ChatFormatting.RESET + " [%d]", ToyController.getDeviceName(), ToyController.getDeviceId())), true);
                     } else {
                         player.displayClientMessage(Component.literal(String.format(ChatFormatting.YELLOW + "Minegasm " + ChatFormatting.RESET + "failed to start\n%s", ToyController.getLastErrorMessage())), false);

@@ -6,6 +6,7 @@ plugins {
     id 'maven-publish'
     id 'net.minecraftforge.gradle' version '[6.0,6.2)'
     id 'com.github.johnrengelman.shadow' version '8.1.1'
+    id 'org.spongepowered.mixin' version '0.7.+'
 }
 
 version = mod_version
@@ -137,6 +138,7 @@ dependencies {
     // If the group id is "net.minecraft" and the artifact id is one of ["client", "server", "joined"],
     // then special handling is done to allow a setup of a vanilla dependency without the use of an external repository.
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
+    annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
     shade 'io.github.blackspherefollower:buttplug4j:3.0.67'
 
     // Example mod dependency with JEI - using fg.deobf() ensures the dependency is remapped to your development mappings
@@ -174,6 +176,12 @@ tasks.named('processResources', ProcessResources).configure {
     filesMatching(['META-INF/mods.toml', 'pack.mcmeta']) {
         expand replaceProperties + [project: project]
     }
+}
+
+mixin {
+    // MixinGradle Settings
+    add sourceSets.main, "mixins.${mod_id}.refmap.json"
+    config "mixins.${mod_id}.json"
 }
 
 // Example for how to get properties into the manifest for reading at runtime.

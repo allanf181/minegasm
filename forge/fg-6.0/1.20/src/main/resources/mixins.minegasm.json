@@ -1,0 +1,14 @@
+{
+  "required": true,
+  "package": "com.therainbowville.minegasm.mixins",
+  "compatibilityLevel": "JAVA_16",
+  "injectors": {
+    "defaultRequire": 1
+  },
+  "refmap": "mixins.minegasm.refmap.json",
+  "client": [
+    "ClientLevelMixin",
+    "ClientPacketListenerMixin",
+    "MultiPlayerGameModeMixin"
+  ]
+}
