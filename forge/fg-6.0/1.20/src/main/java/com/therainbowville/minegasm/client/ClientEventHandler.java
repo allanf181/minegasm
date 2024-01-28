@@ -36,8 +36,6 @@ public class ClientEventHandler {
 
     private static final long window = Minecraft.getInstance().getWindow().getWindow();
 
-
-
     public static boolean isFocus() {
         return GLFW.glfwGetWindowAttrib(window, 131073) != 0;
     }
@@ -47,7 +45,7 @@ public class ClientEventHandler {
     private static final int TICKS_PER_SECOND = 20;
     private static int tickCounter = -1;
     private static int clientTickCounter = -1;
-    private static final double[] state = new double[1200];
+    private static final double[] state = new double[12000];
     private static boolean paused = false;
     private static UUID playerId = null;
 
@@ -60,11 +58,11 @@ public class ClientEventHandler {
     }
 
     private static int getStateCounter() {
-        return (tickCounter / 20) + 1;
+        return tickCounter / 2;
     }
 
     private static int getNextStateCounter() {
-        return getStateCounter() + 1;
+        return (getStateCounter() + 1) % state.length;
     }
 
     private static void setState(int start, int duration, int intensity, boolean decay) {
@@ -72,13 +70,16 @@ public class ClientEventHandler {
             return;
         }
 
+        duration = duration * 10;
+
         if (decay) {
-            int safeDuration = Math.max(0, duration - 2);
+            int safeDuration = Math.max(0, duration - 20);
             for (int i = 0; i < safeDuration; i++) {
                 setState(start + i, intensity);
             }
-            setState(start + safeDuration, intensity / 2);
-            setState(start + safeDuration + 1, intensity / 4);
+            for (int i = 0; i < 20; i++) {
+                setState(start + safeDuration + i, intensity * (20 - i) / 20);
+            }
         } else {
             for (int i = 0; i < duration; i++) {
                 setState(start + i, intensity);
@@ -92,8 +93,11 @@ public class ClientEventHandler {
     }
 
     private static void setState(int counter, int intensity, boolean accumulate) {
-        LOGGER.trace("SetState intensity: " + intensity);
+
         int safeCounter = counter % state.length;
+        if (intensity > 0){
+            LOGGER.trace("SetState intensity: " + intensity + " at: [" + safeCounter + "](" + counter + ")");
+        }
         if (accumulate) {
             state[safeCounter] = Math.min(1.0, state[safeCounter] + (intensity / 100.0));
         } else {
@@ -157,7 +161,7 @@ public class ClientEventHandler {
 
                 tickCounter = (tickCounter + 1) % (20 * (60 * TICKS_PER_SECOND)); // 20 min day cycle
 
-                if (tickCounter % TICKS_PER_SECOND == 0) { // every 1 sec
+                if (tickCounter % 2 == 0){
                     if (uuid.equals(playerId)) {
                         int stateCounter = getStateCounter();
 
@@ -178,15 +182,11 @@ public class ClientEventHandler {
                         double newVibrationLevel = state[stateCounter];
                         state[stateCounter] = 0;
 
-                        LOGGER.trace("Tick " + stateCounter + ": " + newVibrationLevel);
-
-                        ToyController.setVibrationLevel(newVibrationLevel);
+                        if (ToyController.currentVibrationLevel != newVibrationLevel) {
+                            LOGGER.trace("Tick " + stateCounter + ": " + newVibrationLevel);
+                            ToyController.setVibrationLevel(newVibrationLevel);
+                        }
                     }
-                }
-
-                if (tickCounter % (5 * TICKS_PER_SECOND) == 0) { // 5 secs
-                    LOGGER.trace("Health: " + playerHealth);
-                    LOGGER.trace("Food: " + playerFoodLevel);
                 }
             }
         } catch (Throwable e) {
@@ -243,8 +243,7 @@ public class ClientEventHandler {
     private static void processXpChange(int difference) {
         long duration = Math.round(Math.ceil(Math.log(difference + 0.5)));
 
-        LOGGER.trace("XP CHANGE: " + difference);
-        LOGGER.trace("duration: " + duration);
+        LOGGER.trace("XP CHANGE: " + difference + " duration: " + duration);
 
         setState(getNextStateCounter(), Math.toIntExact(duration), getIntensity("xpChange"), true);
     }
@@ -277,8 +276,7 @@ public class ClientEventHandler {
 
     @SubscribeEvent
     public static void onClientBreakingBlock(ClientBreakingBlockEvent event){
-        LOGGER.trace("ClientBlockBreak: " + event.getBlockState().getBlock().toString() + " at " + event.getBlockPos().toString());
-        LOGGER.trace("Stage: " + event.getDestroyStage());
+        LOGGER.trace("ClientBlockBreak: " + event.getBlockState().getBlock().toString() + " at " + event.getBlockPos().toString() + " destroy stage: " + event.getDestroyStage());
 
         UUID uuid = event.getPlayer().getGameProfile().getId();
 
@@ -299,7 +297,7 @@ public class ClientEventHandler {
             int intensity = minIntensity + (maxIntensity - minIntensity) * (event.getDestroyStage()+1) / 10;
 
             if (canHarvest) {
-                setState(getNextStateCounter(), 1, intensity, false);
+                setState(getNextStateCounter(),  intensity);
             }
         }
     }
@@ -329,8 +327,6 @@ public class ClientEventHandler {
 
             if (uuid.equals(playerId)) {
                 processBreakEvent(event.getState(), player);
-
-                LOGGER.trace("XP to drop: " + event.getExpToDrop());
             }
         } catch (Throwable e) {
             LOGGER.throwing(e);
@@ -341,7 +337,11 @@ public class ClientEventHandler {
     public static void onClientBlockBreak(ClientBlockBreakEvent event){
         LOGGER.trace("ClientBlockBreak: " + event.getBlockState().getBlock().toString() + " at " + event.getBlockPos().toString());
         try {
-            processBreakEvent(event.getBlockState(), event.getPlayer());
+            Player player = event.getPlayer();
+            UUID uuid = player.getGameProfile().getId();
+            if (uuid.equals(playerId)) {
+                processBreakEvent(event.getBlockState(), player);
+            }
         } catch (Throwable e) {
             LOGGER.throwing(e);
         }
@@ -425,7 +425,7 @@ public class ClientEventHandler {
                 if (uuid.equals(Minecraft.getInstance().player.getGameProfile().getId())) {
                     LOGGER.info("Player in: " + player.getGameProfile().getName() + " " + player.getGameProfile().getId().toString());
                     if (ToyController.connectDevice()) {
-                        setState(getNextStateCounter(), 5);
+                        setState(getStateCounter(), 1, 5, false);
                         player.displayClientMessage(Component.literal(String.format("Connected to " + ChatFormatting.GREEN + "%s" + ChatFormatting.RESET + " [%d]", ToyController.getDeviceName(), ToyController.getDeviceId())), true);
                     } else {
                         player.displayClientMessage(Component.literal(String.format(ChatFormatting.YELLOW + "Minegasm " + ChatFormatting.RESET + "failed to start\n%s", ToyController.getLastErrorMessage())), false);

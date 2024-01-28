@@ -20,7 +20,9 @@ public class EventHooks {
 
     public static void onClientChangeExperience(int oldExperience, int newExperience) {
         ClientChangeExperienceEvent event = new ClientChangeExperienceEvent(oldExperience, newExperience, (oldExperience - newExperience) * -1);
-        MinecraftForge.EVENT_BUS.post(event);
+        if (event.getDifference() != 0) {
+            MinecraftForge.EVENT_BUS.post(event);
+        }
     }
 
     public static void onClientBreakingBlock(LocalPlayer player, BlockState blockState, BlockPos blockPos, int destroyStage) {

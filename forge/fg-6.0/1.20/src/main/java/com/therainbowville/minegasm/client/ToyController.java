@@ -22,8 +22,9 @@ public class ToyController {
 
     public static boolean connectDevice() {
         try {
-            device = null;
-            client.disconnect();
+            if(isConnected){
+                return Objects.nonNull(device);
+            }
             LOGGER.info("URL: " + MinegasmConfig.serverUrl);
 
             client.connect(new URI(MinegasmConfig.serverUrl));
@@ -74,6 +75,7 @@ public class ToyController {
 
             isConnected = true;
         } catch (Exception e) {
+            isConnected = false;
             lastErrorMessage = e.getMessage();
             LOGGER.error(e.getMessage(), e);
         }
